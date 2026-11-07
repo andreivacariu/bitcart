@@ -32,6 +32,10 @@ def test_parse_eip681_chain_id(url: str, expected: int | None) -> None:
         ("TRX", "shasta", "tron:TAbc", "tron:2494104990"),
         ("TRX", "nile", "tron:TAbc", "tron:3448148188"),
         ("TRX", "custom", "tron:TAbc", None),
+        ("SOL", "mainnet", "solana:Abc?amount=1&reference=Ref", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"),
+        ("SOL", "devnet", "solana:Abc", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"),
+        ("SOL", "testnet", "solana:Abc", "solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z"),
+        ("SOL", "localnet", "solana:Abc", None),
         ("BTC", "mainnet", "bitcoin:bc1q?amount=1", None),
     ],
 )
@@ -64,6 +68,16 @@ def test_get_links_tron_mainnet() -> None:
     }
 
 
+def test_get_links_solana_mainnet() -> None:
+    checkout = urllib.parse.quote(CHECKOUT, safe="")
+    origin = urllib.parse.quote("https://pay.example.com", safe="")
+    assert walletpay.get_links("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", CHECKOUT) == [
+        {"id": "phantom", "name": "Phantom", "url": f"https://phantom.app/ul/browse/{checkout}?ref={origin}"},
+        {"id": "solflare", "name": "Solflare", "url": f"https://solflare.com/ul/v1/browse/{checkout}?ref={origin}"},
+        {"id": "trust", "name": "Trust Wallet", "url": f"https://link.trustwallet.com/open_url?coin_id=501&url={checkout}"},
+    ]
+
+
 @pytest.mark.parametrize(
     ("network", "expected"),
     [
@@ -71,6 +85,7 @@ def test_get_links_tron_mainnet() -> None:
         ("eip155:137", ["metamask", "trust"]),
         ("eip155:11155111", ["metamask"]),
         ("tron:3448148188", ["tronlink"]),
+        ("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", ["phantom", "solflare"]),
         (None, []),
     ],
 )

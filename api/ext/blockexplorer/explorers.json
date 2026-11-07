@@ -41,6 +41,11 @@
         "nile": "https://nile.tronscan.org/#/transaction/{}",
         "shasta": "https://shasta.tronscan.org/#/transaction/{}"
     },
+    "sol": {
+        "mainnet": "https://explorer.solana.com/tx/{}",
+        "devnet": "https://explorer.solana.com/tx/{}?cluster=devnet",
+        "testnet": "https://explorer.solana.com/tx/{}?cluster=testnet"
+    },
     "grs": {
         "mainnet": "https://esplora.groestlcoin.org/tx/{}",
         "testnet": "https://esplora-test.groestlcoin.org/tx/{}"

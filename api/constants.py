@@ -24,6 +24,9 @@ RESET_FINALIZE_MAX_ATTEMPTS = 10  # max finalize attempts per IP per hour
 RESET_RATE_WINDOW = 60 * 60  # fixed window in seconds
 CONFIGURATOR_SSH_MAX_ATTEMPTS = 10  # max configurator SSH attempts per IP per hour
 CONFIGURATOR_SSH_RATE_WINDOW = 60 * 60  # fixed window in seconds
+# each payment transaction costs several calls to the store's RPC provider; a wallet payment needs 2 of them
+PAYMENT_TRANSACTION_MAX_ATTEMPTS = 30  # max payment transactions built per IP per window
+PAYMENT_TRANSACTION_RATE_WINDOW = 60  # fixed window in seconds
 # as supported by backup.sh
 BACKUP_PROVIDERS = ["local", "scp", "s3"]
 BACKUP_FREQUENCIES = ["daily", "weekly", "monthly"]

@@ -1,6 +1,6 @@
 import asyncio
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 
 import bitcart
 from bitcart import BTC  # type: ignore[attr-defined]
@@ -76,13 +76,18 @@ class PayoutManager:
                     )
                 raw_tx = await coin.server.transfer(wallet.contract, destination, amount, unsigned=True)
             else:
+                fee_params: dict[str, Any] = {}
                 if amount == SEND_ALL:
+                    # the estimate and the transaction must use the same rate to spend the balance exactly
+                    fee_params["gas_price"] = await coin.server.getfeerate()
                     amount = Decimal((await coin.balance())["confirmed"])
                     estimated_fee = Decimal(
-                        await coin.server.get_default_fee(await coin.server.payto(destination, amount, unsigned=True))
+                        await coin.server.get_default_fee(
+                            await coin.server.payto(destination, amount, unsigned=True, **fee_params)
+                        )
                     )
                     amount -= estimated_fee
-                raw_tx = await coin.server.payto(destination, amount, unsigned=True)
+                raw_tx = await coin.server.payto(destination, amount, unsigned=True, **fee_params)
         return cast(str, raw_tx)
 
     async def prepare_payout_details(

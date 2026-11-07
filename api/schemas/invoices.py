@@ -16,7 +16,7 @@ class WalletLink(Schema):
 
 
 class PaymentWallet(Schema):
-    network: str | None = Field(examples=["eip155:1", "tron:728126428"])
+    network: str | None = Field(examples=["eip155:1", "tron:728126428", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"])
     sender_address_required: bool
     links: list[WalletLink]
 
@@ -64,6 +64,20 @@ class CustomerUpdateData(Schema):
 class MethodUpdateData(Schema):
     id: str
     address: str
+
+
+class PaymentTransactionRequest(Schema):
+    id: str = Field(description="Payment method id")
+    account: str = Field(description="Address of the paying wallet")
+
+
+class PaymentTransaction(Schema):
+    transaction: str = Field(description="Unsigned base64 transaction, the paying wallet is its fee payer and only signer")
+    decimals: int = Field(description="Decimals of the payment currency")
+    amount: str = Field(description="Base units the transaction transfers")
+    balance: str = Field(description="Paying wallet balance of the payment currency, in base units")
+    fee: str = Field(description="Native base units the paying wallet needs on top of the transfer: network fee and rent")
+    native_balance: str = Field(description="Paying wallet balance of the native currency, in base units")
 
 
 class MarkCompleteOptions(Schema):

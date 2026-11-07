@@ -100,6 +100,7 @@ ltc = [
     "scrypt>=0.6.0",
 ]
 matic = [{ include-group = "eth-based" }]
+sol = [{ include-group = "daemon-base" }, "mnemonic>=0.21", "solders>=0.29.0"]
 trx = [
     { include-group = "eth-based" },
     "async-lru>=2.4.0",
@@ -121,6 +122,7 @@ daemons = [
     { include-group = "grs" },
     { include-group = "ltc" },
     { include-group = "matic" },
+    { include-group = "sol" },
     { include-group = "trx" },
     { include-group = "xmr" },
     { include-group = "xrg" },
@@ -185,6 +187,7 @@ non_dev_dependency_groups = [
     "ltc",
     "otel",
     "production",
+    "sol",
     "trx",
     "web",
     "xmr",

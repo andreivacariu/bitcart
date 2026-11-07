@@ -44,6 +44,10 @@ class TRX:
     coingecko_id = "tron"
 
 
+class SOL:
+    coingecko_id = "solana"
+
+
 class GRS:
     coingecko_id = "groestlcoin"
 

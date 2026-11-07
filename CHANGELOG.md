@@ -2,6 +2,17 @@
 
 ## Latest changes
 
+### Solana support
+
+New `sol` coin: accept SOL, USDC and USDT payments on Solana, and send payouts from Solana wallets.
+
+- Wallets can be created from an address (watch-only), a seed phrase (same address as Phantom, Solflare and Backpack), a base58 secret key or a `solana-keygen` keypair file. Pick USDC or USDT as the wallet token to accept them
+- Checkout shows Solana Pay QR codes. Each payment method has its own reference key, so customers don't need to enter their sender address, and any Solana Pay wallet can pay it. Payments made without the reference (for example, exchange withdrawals to the copied address) aren't matched automatically
+- New public `POST /invoices/{id}/payment_transaction` endpoint builds the transaction paying an invoice from a customer's wallet, used by the checkout to pay from browser wallets like Phantom and Solflare. It is rate-limited per IP
+- The daemon watches the merchant's accounts instead of downloading every block, and catches up on payments missed while it was down (`SOL_MAX_SYNC_HOURS`, 1 hour by default)
+- On mainnet, the default RPC endpoints require access (an allowlisted IP or access-token URLs); set `SOL_SERVER` to use another RPC provider. The daemon refuses to start if its servers are on another network than `SOL_NETWORK`
+- Send-all payouts on ETH-based coins now estimate the fee and build the transaction with the same fee rate
+
 ## 0.11.0.0
 
 ### New Checkout app

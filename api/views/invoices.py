@@ -6,7 +6,15 @@ from fastapi import APIRouter, Depends, Path, Request, Response, Security
 
 from api import models, utils
 from api.constants import AuthScopes
-from api.schemas.invoices import CreateInvoice, CustomerUpdateData, DisplayInvoice, MethodUpdateData, UpdateInvoice
+from api.schemas.invoices import (
+    CreateInvoice,
+    CustomerUpdateData,
+    DisplayInvoice,
+    MethodUpdateData,
+    PaymentTransaction,
+    PaymentTransactionRequest,
+    UpdateInvoice,
+)
 from api.schemas.refunds import DisplayRefund, RefundData, SubmitRefundData
 from api.services.auth import AuthService
 from api.services.crud.invoices import InvoiceService
@@ -80,6 +88,22 @@ async def update_payment_details(
     data: MethodUpdateData,
 ) -> Any:  # pragma: no cover
     return await invoice_service.update_payment_details(model_id, data)
+
+
+@router.post("/{model_id}/payment_transaction", response_model=PaymentTransaction)
+async def create_payment_transaction(
+    invoice_service: FromDishka[InvoiceService],
+    request: Request,
+    model_id: str,
+    data: PaymentTransactionRequest,
+) -> Any:
+    """Build an unsigned transaction paying the invoice from the customer's wallet
+
+    Supported for Solana payment methods. The checkout asks the customer's wallet to sign and send it.
+    The transaction carries the payment's reference, so the payment is detected without a sender address.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    return await invoice_service.create_payment_transaction(model_id, data, client_ip)
 
 
 @router.post("/{model_id}/refunds", response_model=DisplayRefund)

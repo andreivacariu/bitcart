@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from advanced_alchemy.base import ModelProtocol
 from bitcart import BTC  # type: ignore[attr-defined]
+from bitcart.errors import BaseError as BitcartBaseError
 from bitcart.errors import errors
 from dishka import AsyncContainer
 from fastapi import HTTPException, Request, Response
@@ -20,7 +21,7 @@ from sqlalchemy.orm import selectinload
 from starlette.datastructures import CommaSeparatedStrings
 
 from api import invoices, metrics, models, utils
-from api.constants import DEFAULT_SENDMAIL_SUBJECT
+from api.constants import DEFAULT_SENDMAIL_SUBJECT, PAYMENT_TRANSACTION_MAX_ATTEMPTS, PAYMENT_TRANSACTION_RATE_WINDOW
 from api.db import AsyncSession
 from api.exceptions import EmailSendError, ExchangeRateError
 from api.ext import export as export_ext
@@ -30,7 +31,7 @@ from api.invoices import FAILED_STATUSES, PAID_STATUSES, InvoiceExceptionStatus,
 from api.logging import get_exception_details, get_exception_message, get_logger
 from api.plugins import SKIP_PAYMENT_METHOD
 from api.redis import Redis
-from api.schemas.invoices import CreateInvoice, MarkCompleteOptions, MethodUpdateData
+from api.schemas.invoices import CreateInvoice, MarkCompleteOptions, MethodUpdateData, PaymentTransactionRequest
 from api.schemas.misc import BatchAction
 from api.schemas.stores import StoreCheckoutSettings
 from api.services.coins import CoinService
@@ -497,7 +498,8 @@ class InvoiceService(CRUDService[models.Invoice]):
             network = walletpay.get_network(coin.coin_name, coin_settings.get("network", ""), payment_url)
         return {
             "network": network,
-            "sender_address_required": not lightning and coin.is_eth_based and coin.coin_name != "XMR",
+            # Solana payments are matched by the per-invoice Solana Pay reference instead of the sender address
+            "sender_address_required": not lightning and coin.is_eth_based and coin.coin_name not in ("XMR", "SOL"),
             "links": walletpay.get_links(network, f"{self.settings.checkout_url}/i/{invoice.id}?method={payment_id}"),
         }
 
@@ -860,23 +862,23 @@ class InvoiceService(CRUDService[models.Invoice]):
             headers=headers,
         )
 
+    async def get_invoice_payment_method(
+        self, item: models.Invoice, payment_id: str
+    ) -> tuple[models.PaymentMethod, models.Wallet]:
+        if not any(payment.id == payment_id for payment in item.payments):
+            raise HTTPException(404, "No such payment method found")
+        fetch_data = await self.payment_method_repository.get_info_by_id(payment_id)
+        if not fetch_data:
+            raise HTTPException(404, "No such payment method found")
+        return fetch_data
+
     async def update_payment_details(self, invoice_id: str, data: MethodUpdateData) -> bool:
         item = await self.get(invoice_id)
         if item.status != InvoiceStatus.PENDING:
             raise HTTPException(422, "Can't update details for paid invoice")
-        found_payment: models.PaymentMethod | None = None
-        for payment in item.payments:
-            if payment.id == data.id:
-                found_payment = payment
-                break
-        if found_payment is None:
-            raise HTTPException(404, "No such payment method found")
-        if found_payment.user_address is not None:
+        method, wallet = await self.get_invoice_payment_method(item, data.id)
+        if method.user_address is not None:
             raise HTTPException(422, "Can't update payment address once set")
-        fetch_data = await self.payment_method_repository.get_info_by_id(found_payment.id)
-        if not fetch_data:
-            raise HTTPException(404, "No such payment method found")
-        method, wallet = fetch_data
         coin = await self.coin_service.get_coin(
             method.currency, {"xpub": wallet.xpub, "contract": method.contract, **wallet.additional_xpub_data}
         )
@@ -889,3 +891,36 @@ class InvoiceService(CRUDService[models.Invoice]):
         await self.plugin_registry.run_hook("invoice_payment_address_set", item, method, data.address)
         method.update(user_address=data.address)
         return True
+
+    async def create_payment_transaction(
+        self, invoice_id: str, data: PaymentTransactionRequest, client_ip: str
+    ) -> dict[str, Any]:
+        if not self.settings.is_testing():
+            await utils.redis.check_rate_limit(
+                self.redis_pool,
+                f"payment_transaction:rate:ip:{client_ip}",
+                PAYMENT_TRANSACTION_MAX_ATTEMPTS,
+                PAYMENT_TRANSACTION_RATE_WINDOW,
+                "Too many payment transaction requests, try again later",
+            )
+        item = await self.get(invoice_id)
+        if item.status != InvoiceStatus.PENDING:
+            raise HTTPException(422, "Invoice is not pending")
+        method, wallet = await self.get_invoice_payment_method(item, data.id)
+        coin = await self.coin_service.get_coin(
+            method.currency, {"xpub": wallet.xpub, "contract": method.contract, **wallet.additional_xpub_data}
+        )
+        if method.lightning or coin.coin_name != "SOL":
+            raise HTTPException(422, "Wallet transactions are not supported for this payment method")
+        try:
+            if not await coin.server.validateaddress(data.account):
+                raise HTTPException(422, "Invalid address")
+            # the full amount shown to the customer, the daemon's request is reduced by the underpaid tolerance
+            return await coin.server.get_payment_transaction(method.lookup_field, data.account, str(method.amount))
+        except errors.RequestNotPayableError:  # type: ignore
+            raise HTTPException(422, "Payment method can't be paid anymore") from None
+        except errors.TransactionSimulationError:  # type: ignore
+            raise HTTPException(422, "Transaction simulation failed") from None
+        except BitcartBaseError as e:  # daemon details may include RPC endpoints, don't show them to the payer
+            logger.error(f"Failed to create payment transaction for {method.id}:\n{get_exception_message(e)}")
+            raise HTTPException(422, "Failed to create the transaction") from None

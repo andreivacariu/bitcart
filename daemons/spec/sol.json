@@ -1,0 +1,19 @@
+{
+    "electrum_map": {
+        "Transaction not found": -32002,
+        "Unsupported token": -32009,
+        "Invalid token mint": -32009,
+        "Request is not payable": -32013,
+        "Transaction simulation failed": -32014
+    },
+    "exceptions": {
+        "-32013": {
+            "exc_name": "RequestNotPayableError",
+            "docstring": "This payment request can't be paid anymore"
+        },
+        "-32014": {
+            "exc_name": "TransactionSimulationError",
+            "docstring": "Transaction simulation failed"
+        }
+    }
+}

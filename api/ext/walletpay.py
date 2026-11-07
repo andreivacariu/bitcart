@@ -4,7 +4,20 @@ from collections.abc import Callable
 
 TRON_CHAIN_IDS = {"mainnet": 728126428, "shasta": 2494104990, "nile": 3448148188}
 
-TRUST_WALLET_COIN_IDS = {"eip155:1": 60, "eip155:56": 20000714, "eip155:137": 966, "tron:728126428": 195}
+# CAIP-2 references are the genesis hash prefixes
+SOLANA_CHAIN_IDS = {
+    "mainnet": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    "devnet": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+    "testnet": "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z",
+}
+
+TRUST_WALLET_COIN_IDS = {
+    "eip155:1": 60,
+    "eip155:56": 20000714,
+    "eip155:137": 966,
+    "tron:728126428": 195,
+    "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": 501,
+}
 
 
 def parse_eip681_chain_id(url: str) -> int | None:
@@ -23,6 +36,9 @@ def get_network(coin_name: str, network: str, payment_url: str) -> str | None:
     if coin_name == "TRX":
         tron_chain_id = TRON_CHAIN_IDS.get(network)
         return f"tron:{tron_chain_id}" if tron_chain_id else None
+    if coin_name == "SOL":
+        solana_chain_id = SOLANA_CHAIN_IDS.get(network)
+        return f"solana:{solana_chain_id}" if solana_chain_id else None
     chain_id = parse_eip681_chain_id(payment_url)
     return f"eip155:{chain_id}" if chain_id else None
 
@@ -47,8 +63,26 @@ def tronlink_link(network: str, url: str) -> str | None:
     return f"tronlinkoutside://pull.activity?param={urllib.parse.quote(param, safe='')}"
 
 
+def solana_browse_link(base_url: str, network: str, url: str) -> str | None:
+    if not network.startswith("solana:"):
+        return None
+    parsed = urllib.parse.urlsplit(url)
+    ref = f"{parsed.scheme}://{parsed.netloc}"
+    return f"{base_url}/{urllib.parse.quote(url, safe='')}?ref={urllib.parse.quote(ref, safe='')}"
+
+
+def phantom_link(network: str, url: str) -> str | None:
+    return solana_browse_link("https://phantom.app/ul/browse", network, url)
+
+
+def solflare_link(network: str, url: str) -> str | None:
+    return solana_browse_link("https://solflare.com/ul/v1/browse", network, url)
+
+
 WALLET_APPS: list[tuple[str, str, Callable[[str, str], str | None]]] = [
     ("metamask", "MetaMask", metamask_link),
+    ("phantom", "Phantom", phantom_link),
+    ("solflare", "Solflare", solflare_link),
     ("trust", "Trust Wallet", trust_wallet_link),
     ("tronlink", "TronLink", tronlink_link),
 ]

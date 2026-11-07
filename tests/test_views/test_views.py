@@ -17,6 +17,7 @@ import pytest
 import pytest_mock
 from bitcart import BTC, LTC  # type: ignore
 from bitcart.errors import BaseError as BitcartBaseError
+from bitcart.errors import errors
 from dishka import Scope
 from fastapi import FastAPI
 from httpx import Request as HttpRequest
@@ -2563,6 +2564,104 @@ async def test_invoices_payment_details(client: TestClient, token: str) -> None:
     ).status_code == 422
 
 
+async def test_invoice_payment_transaction(
+    client: TestClient, token: str, app: FastAPI, mocker: pytest_mock.MockerFixture
+) -> None:
+    invoice = await create_invoice(client, token)
+    url = f"/invoices/{invoice['id']}/payment_transaction"
+    payment_id = invoice["payments"][0]["id"]
+    account = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
+    assert (await client.post(url, json={"id": "test", "account": account})).status_code == 404
+    other_payment_id = (await create_invoice(client, token))["payments"][0]["id"]
+    assert (await client.post(url, json={"id": other_payment_id, "account": account})).status_code == 404
+    resp = await client.post(url, json={"id": payment_id, "account": account})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Wallet transactions are not supported for this payment method"
+    built = {"transaction": "AQ==", "decimals": 9, "amount": "1000", "balance": "500", "fee": "5000", "native_balance": "500"}
+    server = mock.Mock(
+        validateaddress=mock.AsyncMock(side_effect=lambda address: address == account),
+        get_payment_transaction=mock.AsyncMock(return_value=built),
+    )
+    mocker.patch.object(CoinService, "get_coin", return_value=mock.Mock(coin_name="SOL", server=server))
+    resp = await client.post(url, json={"id": payment_id, "account": "invalid"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Invalid address"
+    server.get_payment_transaction.assert_not_awaited()
+    resp = await client.post(url, json={"id": payment_id, "account": account})
+    assert resp.status_code == 200
+    assert resp.json() == built
+    async with app.state.dishka_container(scope=Scope.SESSION) as container:
+        payment_method_repository = await container.get(PaymentMethodRepository)
+        method, _ = await payment_method_repository.get_info_by_id(payment_id)
+    server.get_payment_transaction.assert_awaited_once_with(method.lookup_field, account, str(method.amount))
+    server.get_payment_transaction.side_effect = errors.RequestNotPayableError("This payment request can't be paid anymore")
+    resp = await client.post(url, json={"id": payment_id, "account": account})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Payment method can't be paid anymore"
+    server.get_payment_transaction.side_effect = errors.TransactionSimulationError("Transaction simulation failed")
+    resp = await client.post(url, json={"id": payment_id, "account": account})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Transaction simulation failed"
+    server.get_payment_transaction.side_effect = BitcartBaseError(
+        "Failed after 5 retries: http://rpc.example.com/secret-token"
+    )
+    resp = await client.post(url, json={"id": payment_id, "account": account})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Failed to create the transaction"
+    server.validateaddress.side_effect = BitcartBaseError("daemon is down")
+    resp = await client.post(url, json={"id": payment_id, "account": account})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Failed to create the transaction"
+    assert (
+        await client.post(
+            "/invoices/batch",
+            json={"ids": [invoice["id"]], "command": "mark_complete"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    ).status_code == 200
+    resp = await client.post(url, json={"id": payment_id, "account": account})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Invoice is not pending"
+
+
+async def test_invoice_payment_transaction_pays_shown_amount(
+    client: TestClient, token: str, mocker: pytest_mock.MockerFixture, store: dict[str, Any]
+) -> None:
+    mocker.patch(
+        "api.services.exchange_rate.ExchangeRateService.get_rate",
+        side_effect=lambda exchange, pair=None: {"BTC_USD": Decimal(60000)} if pair is None else Decimal(60000),
+    )
+    resp = await client.patch(
+        f"/stores/{store['id']}/checkout_settings",
+        json={"underpaid_percentage": 50},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    invoice = await create_invoice(client, token, store_id=store["id"], price=1)
+    payment = invoice["payments"][0]
+    server = mock.Mock(
+        validateaddress=mock.AsyncMock(return_value=True),
+        get_payment_transaction=mock.AsyncMock(
+            return_value={
+                "transaction": "AQ==",
+                "decimals": 8,
+                "amount": "1",
+                "balance": "1",
+                "fee": "1",
+                "native_balance": "1",
+            }
+        ),
+    )
+    mocker.patch.object(CoinService, "get_coin", return_value=mock.Mock(coin_name="SOL", server=server))
+    resp = await client.post(
+        f"/invoices/{invoice['id']}/payment_transaction",
+        json={"id": payment["id"], "account": "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"},
+    )
+    assert resp.status_code == 200
+    # the daemon's request is reduced by the underpaid tolerance, the wallet must still pay the amount shown
+    assert Decimal(server.get_payment_transaction.call_args.args[2]) == Decimal(payment["amount"]) == Decimal("0.00001667")
+
+
 async def test_invoice_payment_wallet(client: TestClient, token: str, app: FastAPI) -> None:
     invoice = await create_invoice(client, token)
     assert invoice["payments"][0]["wallet"] == {"network": None, "sender_address_required": False, "links": []}
@@ -2591,6 +2690,15 @@ class FakeCoin:
         (FakeCoin("TRX", True), "nile", "tron:TAbc", False, "tron:3448148188", True, ["tronlink"]),
         (FakeCoin("TRX", True), "private", "tron:TAbc", False, None, True, []),
         (FakeCoin("XMR", True), "mainnet", "monero:4abc", False, None, False, []),
+        (
+            FakeCoin("SOL", True),
+            "mainnet",
+            "solana:Abc?reference=Ref",
+            False,
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            False,
+            ["phantom", "solflare", "trust"],
+        ),
         (FakeCoin("BTC", False), "mainnet", "bitcoin:bc1q", False, None, False, []),
         (FakeCoin("BTC", False), "mainnet", "lnbc1", True, None, False, []),
     ],

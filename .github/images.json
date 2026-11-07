@@ -30,6 +30,10 @@
         "dockerfile": "trx.Dockerfile",
         "bases": "eth"
     },
+    "bitcart-sol": {
+        "dockerfile": "sol.Dockerfile",
+        "bases": "eth"
+    },
     "bitcart-xrg": {
         "dockerfile": "xrg.Dockerfile",
         "bases": "bch",
